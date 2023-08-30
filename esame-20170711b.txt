@@ -1,0 +1,17 @@
+Insegnamento di "Analisi dei dati (Data mining)"
+Prova d'esame del 11 luglio 2017 - parte pratica
+
+Alcuni ricercatori sono interessati alla classificazione di una voce ottenuta da un file audio, come maschile o femminile a seconda di alcune proprietà acustiche.
+
+A tale scopo, nel file voce.csv, è disponibile un campione di registrazioni della durata di 2-5 minuti, tratti da 62 file audio provenienti da diversi capitoli di 
+audiolibri. 
+Di questi capitoli, 32 sono letti da lettori di sesso maschile e i restanti 30 da lettrici.
+Per ciascun file è stato creato uno spettrogramma (rappresentazione grafica dell'intensità di un suono in funzione del tempo e della frequenza) dal quale sono stati 
+estratti i campioni che effettivamente rappresentano un suono, tralasciando il rumore bianco. 
+Si sono quindi isolati 19090 spezzoni dei quali 10313 provenienti da lettori di sesso maschile e 8777 da lettrici.
+Per ciascun spezzone sono disponibili le seguenti variabili:
+
+· meanfreq: frequenza media (in kHz)· sd: deviazione standard della frequenza· median: mediana della frequenza (in kHz)· Q25: primo quartile (in kHz)· Q75: terzo quartile (in kHz)· IQR: scarto interquartile (in kHz)· skew: misura di asimmetria della distribuzione· kurt: misura di curtosi  della distribuzione· sp.ent: entropia spettrale· sfm: piattezza spettrale· mode: moda della frequenza (in kHz)· centroid: centroide della frequenza· peakf: picco di frequenza
+· meanfun: media della frequenza fondamentale· minfun: frequenza fondamentale minima· maxfun: frequenza fondamentale massima· meandom: media della frequenza dominante· mindom: frequenza dominante minima· maxdom: frequenza dominante massima· dfrange: range della frequenza dominante· modindx: indice di modulazioneE’ inoltre disponibile la variabile qualitativa “genere” che identifica il gruppo di appartenenza.
+
+

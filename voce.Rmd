@@ -1,0 +1,448 @@
+---
+title: |
+  <center> Insegnamento di Analisi dei dati (Data mining) </center> 
+  <center> Prova d'esame dell' 11 luglio 2017 - parte pratica </center>
+author: "Daniele Cugnigni"
+date: "2023-02-20"
+output:
+  pdf_document: 
+    latex_engine: xelatex
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE) #echo = TRUE per vedere anche il codice
+knitr::opts_chunk$set(results = TRUE) #results = TRUE per vedere l'output del codice
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+```
+
+## Testo d'esame
+
+Alcuni ricercatori sono interessati alla classificazione di una voce ottenuta da un file audio, come maschile o femminile a seconda di alcune proprietà acustiche. A tale scopo, nel file voce.csv, è disponibile un campione di registrazioni della durata di 2-5 minuti, tratti da 62 file audio provenienti da diversi capitoli di audiolibri. Di questi capitoli, 32 sono letti da lettori di sesso maschile e i restanti 30 da lettrici. Per ciascun file è stato creato uno spettrogramma (rappresentazione grafica dell'intensità di un suono in funzione del tempo e della frequenza) dal quale sono stati estratti i campioni che effettivamente rappresentano un suono, tralasciando il rumore bianco. Si sono quindi isolati 19090 spezzoni dei quali 10313 provenienti da lettori di sesso maschile e 8777 da lettrici. Per ciascun spezzone sono disponibili le seguenti variabili:
+
+-   meanfreq: frequenza media (in kHz)
+
+-   sd: deviazione standard della frequenza
+
+-   median: mediana della frequenza (in kHz)
+
+-   Q25: primo quartile (in kHz)
+
+-   Q75: terzo quartile (in kHz)
+
+-   IQR: scarto interquartile (in kHz)
+
+-   skew: misura di asimmetria della distribuzione
+
+-   kurt: misura di curtosi della distribuzione
+
+-   sp.ent: entropia spettrale
+
+-   sfm: piattezza spettrale
+
+-   mode: moda della frequenza (in kHz)
+
+-   centroid: centroide della frequenza
+
+-   peakf: picco di frequenza
+
+-   meanfun: media della frequenza fondamentale
+
+-   minfun: frequenza fondamentale minima
+
+-   maxfun: frequenza fondamentale massima
+
+-   meandom: media della frequenza dominante
+
+-   mindom: frequenza dominante minima
+
+-   maxdom: frequenza dominante massima
+
+-   dfrange: range della frequenza dominante
+
+-   modindx: indice di modulazione
+
+E' inoltre disponibile la variabile qualitativa "genere" che identifica il gruppo di appartenenza.
+
+```{r}
+
+dati <- read.csv("voce.csv", stringsAsFactors = TRUE)
+
+str(dati)
+dim(dati)
+summary(dati)
+all.equal(dati$X, 1:NROW(dati))
+length(table(dati$sound.files))
+```
+
+## Pulizia del dataset
+
+Il file "voce.csv" è composto da 19090 unità statistiche (gli spezzoni dei 62 file audio) sulle quali sono state rilevate complessivamente 23 variabili, con la variabile *genere* che rappresenta la variabile risposta.\
+Prima di procedere all'analisi del dataset, è opportuno effettuare delle operazioni di pulizia. In primo luogo si nota come la variabile *X* non è nient'altro che l'indicatore di riga, pertanto viene eliminata. Inoltre si nota come la variabile *sound.files* faccia riferimento a quale dei 62 file audio (o capitoli) appartiene il singolo spezzone, ovvero è una variabile indicatrice dell'unità statistica originale (il singolo file audio), pertanto viene eliminata.\
+A questo punto, tenendo conto anche del fatto di avere a disposizione un numero relativamente piccolo di variabili esplicative, è opportuno effettuare delle considerazioni meramente statistiche. Prima di tutto si nota che sono state rilevate le variabili *Q25*, *Q75* e *IQR*, e la relazione che lega queste tre variabili è lineare ed è data da *IQR* = *Q75* - *Q25*, pertanto l'informazione contenuta nello scarto interquartile può essere ricavata dalla differenza tra terzo quartile e primo quartile. Alla luce di questa considerazione, viene deciso di eliminare la variabile *IQR*. Con un ragionamento analogo, emerge che sono state rilevate le variabili riguardanti la frequenza dominante massima, *maxdom*, la frequenza dominante minima, *mindom*, e il range della frequenza dominante, *dfrange*, e viene deciso di eliminare quest'ultima. Inoltre vi è la presenza sia della variabile *meanfreq* che della variabile *centroid*: la correlazione tra queste due variabili è pari ad 1, in particolare i valori della variabile *meanfreq* e della variabile *centroid* sono identici per ogni unità statistica, pertanto l'informazione portata dalle due variabili è la medesima e si decide di eliminare la variabile *centroid*.
+
+```{r}
+cor(dati$Q75 - dati$Q25, dati$IQR)
+cor(dati$maxdom - dati$mindom, dati$dfrange)
+cor(dati$meanfreq, dati$centroid)
+all.equal(dati$meanfreq, dati$centroid)
+
+dati$X <- NULL
+dati$sound.files <- NULL
+dati$IQR <- NULL
+dati$dfrange <- NULL
+dati$centroid <- NULL
+dim(dati)
+```
+
+Inoltre, nel dataset non sono presenti valori mancanti.
+
+```{r}
+#Controllo della presenza di NA
+na_get <- function(data){
+  na_vars <- sapply(data, function(col) sum(is.na(col)))
+  na_vars <- sort(na_vars[na_vars > 0])
+  na_vars <- data.frame(
+    variabile <- names(na_vars),
+    freq_assoluta <- as.numeric(na_vars),
+    freq_relativa <- round(as.numeric(na_vars)/nrow(data), 4)
+  )
+  na_vars
+}
+na_tab <- na_get(dati)
+na_tab
+```
+
+In seguito a queste operazioni, il dataset è composto da 19090 unità statistiche e 18 variabili. A questo punto, prima di procedere con la modellazione dei dati:
+
+-   si verifica l'assenza di variabili esplicative degeneri (e quindi inutili per l'analisi);
+
+-   per tenere in considerazione il compromesso tra varianza e distorsione, si procede con la divisione del dataset in insieme di stima (80%) e insieme di verifica (20%), ottenendo un insieme di stima con 15272 osservazioni ed un insieme di verifica con 3818 osservazioni;
+
+-   si verifica che nell'insieme di stima le classi della variabile risposta siano bilanciate. In particolare, il 46% degli spezzoni sono di voce femminile ed il 54% di voce maschile, pertanto, poichè le classi della variabile risposta risultano essere bilanciate, non si ha la necessità di svolgere ulteriori operazioni e si può procedere all'analisi esplorativa nell'insieme di stima.
+
+```{r}
+#Divisione variabili quantitative e variabili qualitative
+tipo_var <- sapply(dati, class)
+table(tipo_var)
+var_qualitative <- names(dati)[tipo_var == "factor"]
+var_quantitative <- setdiff(names(dati), var_qualitative)
+var_qualitative
+var_quantitative
+
+#Rimozione delle variabili quantitative degeneri
+ids.deg <- which(apply(dati, 2, var) == 0)
+ids.deg
+
+#Rimozione delle variabili qualitative degeneri
+for(col in var_qualitative) cat(col,":", nlevels(dati[,col]), "livelli \n")
+
+#Rimozione/trasformazione in fattori di variabili quantitative che assumono poche modalità
+const <- apply(dati[,var_quantitative], 2, function(x) length(unique(x)) < 4)
+summary(dati[,var_quantitative][,const])
+
+#Salvo l'indice della risposta 
+ids.leak <- which(names(dati) %in% c("genere"))
+ids.leak
+tipo_var <- sapply(dati[, -ids.leak], class)
+table(tipo_var)
+var_qualitative <- names(dati)[-ids.leak][tipo_var == "factor"]
+for(col in var_qualitative) cat(col,":", nlevels(dati[,col]), "livelli \n")
+var_quantitative <- setdiff(names(dati)[-ids.leak], var_qualitative)
+
+var_qualitative
+var_quantitative
+
+#Divisione in insieme di stima e insieme di verifica
+
+n <- dim(dati)[1]
+p <- dim(dati)[2]
+set.seed(12)
+ind <- sample(1:n, round((4/5)*n), replace = T)
+stima <- dati[ind, ]
+ver <- dati[-ind, ]
+rm(dati)
+
+dim(stima)
+dim(ver)
+
+prop.table(table(stima$genere)) #classi bilanciate nell'insieme di stima
+```
+
+## Analisi esplorativa
+
+Tenendo in considerazione che la variabile risposta è una variabile categoriale con due modalità e le variabili esplicative risultano essere tutte quantitative, un'analisi esplorativa (abbastanza) completa ed adeguata si avrebbe con la discretizzazione di ciascuna delle variabili esplicative e l'analisi della distribuzione della variabile dipendente al variare delle singole variabili indipendenti. Poichè l'obiettivo primario non è quello di effettuare l'analisi esplorativa ma di adattare i modelli, si valuta la distribuzione della risposta solamente per alcune variabili esogene.\
+
+
+```{r plot1, fig.dim = c(11,10), fig.align="center", fig.cap = "\\label{fig:plot1}Barplot della variabile risposta rispetto ad alcune variabili esplicative"}
+par(mfrow = c(2,3))
+nomi <- c("meanfreq", "Q25", "Q75", "median", "sfm", "sp.ent")
+for(i in 1:length(nomi)) {
+  classi <- cut(stima[,nomi[i]], breaks = round(summary(stima[,nomi[i]])[-4],2),
+                include.lowest = T)
+  nuovo <- data.frame(genere = stima$genere, esplicativa = classi)
+  colnames(nuovo) <- c("genere", nomi[i])
+  condizionata <- prop.table(table(nuovo),2)
+  barplot(condizionata,beside = T, xlab = nomi[i], ylab = "genere", 
+          ylim = c(0,1.05), col = c(3,4),legend.text = c("female", "male"),
+          cex.axis = 1.1, cex.names = 1.09, cex.lab = 1.4)
+}
+
+rm(nuovo)
+```
+
+I barplot in Figura \ref{fig:plot1} danno indicazione di un possibile effetto molto significativo del primo quartile della frequenza (*Q25*): per valori piccoli del primo quartile la percentuale di spezzoni con voce femminile risulta essere inferiore rispetto alla percentuale di spezzoni con voce maschile, mentre per valori grandi del primo quartile vi è una presenza maggiore di spezzoni con voce femminile. Per quanto riguarda le altre variabili, sembrerebbe esserci un effetto significativo del terzo quartile (*Q75*), dell'entropia spettrale (*sp.ent*) e della piattezza spettrale (*sfm*) in quanto, per tutte e tre, le donne presentano un andamento decrescente all'aumentare del valore della variabile esplicativa mentre gli uomini presentano un andamento crescente. Infine, sembrerebbe non esserci un effetto significativo della frequenza media (*meanfreq*) mentre si nota come per valori piccoli e grandi della mediana (*median*) si ha un numero maggiore di spezzoni con voce femminile, mentre per valori intermedi si hanno più spezzoni con voce maschile. \
+
+Conclusa l'analisi esplorativa nell'insieme di stima, si può procedere alla modellazione dei dati.
+
+## Modellazione dei dati
+
+Poichè l'interesse dei ricercatori è rivolto alla classificazione della voce, senza focalizzare l'attenzione sul classificare correttamente le voci maschili o le voci femminili, e poichè le classi della variabile risposta nell'insieme di stima risultano essere bilanciate, si utilizzerà una soglia pari a 0.5 e come metrica per il confronto tra i modelli il tasso di errata classificazione.
+
+```{r}
+#Formula del modello completo
+nomi <- names(stima)
+form <- as.formula(paste("genere ~ ", paste(nomi[-ids.leak],collapse ="+")))
+
+#Funzione che calcola matrice di confusione e gli errori di classificazione
+tabella.sommario <- function(previsti, osservati){
+  n <-  table(previsti,osservati)
+  err.tot <- 1-sum(diag(n))/sum(n)
+  print(n)
+  cat("errore totale: ", format(err.tot),"\n")
+  invisible(n)
+}
+
+#Errori
+tab <- list()
+```
+
+### Modello logistico
+
+Il primo modello che si adatta è il modello di regressione logistica su tutte le variabili esplicative (senza interazione) con funzione di legame la funzione *logit*.\ 
+
+```{r}
+
+mlog1 <- glm(form, data = stima, family = binomial)
+summary(mlog1)
+mlog1.pred <- predict(mlog1, newdata = ver, type = "response")
+mlog1.tab <- tabella.sommario(mlog1.pred > 0.5, ver$genere)
+tab <- c(tab, list(Logistico = mlog1.tab))
+```
+
+Ad un livello di significatività del 5%, le uniche variabili che risultano avere un effetto statisticamente nullo sulla variabile risposta risultano essere la frequenza dominante minima, la frequenza dominante massima e l'indice di modulazione.\
+Il tasso di errata classificazione nell'insieme di verifica è pari al **14.75%**.
+
+### Modello logistico stepwise
+
+Poichè il modello logistico adattato in precedenza ha messo in luce l'effetto non significativo di alcune variabili esplicative, si ritiene ragionevole adattare un modello di regressione logistica stepwise basato sulla minimizzazione dell'AIC, con ricerca in entrambe le direzioni e a partire dal modello con la sola intercetta. 
+
+```{r}
+mlog1 <- glm(genere ~ 1, weights = NULL, data = stima, family = binomial)
+mlog2 <- step(mlog1, scope = form, direction = "both", trace = F) 
+summary(mlog2)
+logist.step.var <- names(mlog2$model)[-1] 
+length(logist.step.var)
+mlog2.pred <- predict(mlog2, newdata = ver, type = "response")
+mlog2.tab <- tabella.sommario(mlog2.pred > 0.5, ver$genere)
+tab <- c(tab, list(Logistico.stepwise = mlog2.tab))
+names(tab)[2] <- "Logistico stepwise"
+```
+
+Nel modello finale sono incluse 15 delle 17 variabili esplicative, ovvero tutte ad eccezione della frequenza dominante massima e dell'indice di modulazione.\
+Il tasso di errata classificazione nell'insieme di verifica è pari al **14.90%**.
+
+```{r}
+#Divisione training e validation set
+
+set.seed(1234)
+ind <- sample(1:nrow(stima), round((3/4)*nrow(stima)))
+stima.rid <- stima[ind,]
+conv <- stima[-ind,]
+rm(ind)
+```
+
+### Albero di classificazione
+
+Si prosegue la fase di modellazione con l'adattamento di un albero di classificazione, con l'entropia come funzione da minimizzare. Poichè questo modello prevede la selezione del numero di foglie ottimale, si divide l'insieme di stima in due sottoinsiemi: un insieme di stima ridotto in cui far crescere l'albero e un insieme di convalida in cui effettuare la fase di potatura. Nella fase di crescita dell'albero viene impostata una numerosità minima di osservazioni per foglia pari a 2 e una diminuzione dell'entropia per consentire uno split pari almeno a 0.000005, in modo da far diventare l'albero il più profondo possibile. Nella fase di potatura viene valutata la devianza nell'insieme di convalida al variare del numero di foglie dell'albero. Il grafico in Figura \ref{fig:plot2} mostra come il minimo si ottenga con un albero con 14 foglie.
+
+
+```{r plot2, fig.dim = c(4.5,3.5),fig.align="center", fig.cap = "\\label{fig:plot2}Errore nell'insieme di convalida in funzione del numero di foglie"}
+library(tree)
+set.seed(1)
+mtree.or <- tree(genere ~., weights = NULL, data = stima.rid, 
+                control = tree.control(nobs =nrow(stima.rid), minsize = 2,
+                                       mindev = 0.000005))
+prune.mtree <- prune.tree(mtree.or, newdata = conv)      
+plot(prune.mtree)
+J.opt <- prune.mtree$size[which.min(prune.mtree$dev)]
+abline(v = J.opt, col = 2, lty = "dashed")
+```
+
+
+
+Uno dei pregi di questo modello è la facile interpretabilità nel caso in cui l'albero sia poco profondo. A tal riguardo, il grafico in Figura \ref{fig:plot3} mostra gli split dell'albero selezionato, mettendo in luce che il primo quartile e la deviazione standard della frequenza sono le variabili che entrano in gioco nelle prime suddivisioni dell'albero.\
+
+
+```{r plot3,fig.dim = c(6,3.5), fig.align = "center", fig.cap = "\\label{fig:plot3}Albero di classificazione selezionato"}
+mtree <- prune.tree(mtree.or, best = J.opt)
+plot(mtree, type = "uniform")
+text(mtree, pretty = 4, cex = 0.7)
+mtree.pred.prob <- predict(mtree, newdata = ver, type = "vector")[,2]
+tree.tab <- tabella.sommario(mtree.pred.prob > 0.5, ver$genere)
+tab <- c(tab, list(Albero = tree.tab))
+```
+
+Nell'insieme di verifica il tasso di errata classificazione è pari al **14.41%**.
+
+### Modello additivo
+
+Il modello successivamente adattato è il modello additivo generalizzato (GAM). Sono utilizzate le splines di lisciamento con al massimo 3 gradi di libertà equivalenti come lisciatori per le variabili quantitative e una procedura di tipo passo a passo ibrida basata sulla minimizzazione dell'AIC implementata nell'insieme di stima. 
+
+```{r}
+library(gam)
+gam1 = gam(genere ~ 1, weights = NULL, family = binomial, data = stima)
+scope = gam.scope(stima[,-ids.leak], arg = c("df = 2", "df = 3"))
+gam.step = step.Gam(gam1, scope = scope, trace = F)
+summary(gam.step)
+#plot(gam.step, ask = TRUE, se = TRUE)
+gam.step.pred = predict(gam.step, newdata = ver, type = "response")
+gam.step.tab = tabella.sommario(gam.step.pred > 0.5, ver$genere)
+tab = c(tab, list(gam.step = gam.step.tab))
+names(tab)[4] <- "Gam stepwise"
+```
+
+Il modello finale include la deviazione standard, la mediana, il primo e il terzo quartile della frequenza, la curtosi e l'asimmetria della distribuzione, la piattezza e l'entropia spettrale, la media e il minimo della frequenza dominante. Nel dettaglio, gli effetti delle variabili appena menzionato sono tutti stimati tramite splines di lisciamento con 3 gradi di libertà equivalenti.\
+Nell'insieme di verifica si ottiene un tasso di errata classificazione pari al **13.69%**.
+
+### Random forest
+
+Si procede con l'adattamento del *random forest*. Il parametro di regolazione del modello è il numero di covariate da considerare ad ogni suddivisione dell'albero. A tal riguardo, l'insieme di stima viene diviso in un insieme di stima ridotto e uno di convalida e viene adattato il *random forest* con 250 alberi in corrispondenza di ognuno dei possibili valori del numero di covariate considerate. Il numero di covariate selezionato è il valore corrispondente al modello con tasso di errata classificazione minore nell'insieme di convalida. La Figura \ref{fig:plot5} mostra che, con tale procedura, si sceglie un numero di colonne da campionare in ogni albero pari a 8. \
+
+```{r plot5 , fig.dim = c(4.5,3.5),fig.align = "center", fig.cap= "\\label{fig:plot5}Errore nell'insieme di convalida in funzione del numero di covariate campionate"}
+library(randomForest)
+mtries <-  c(1, 2, seq(5, 17, 3))
+err <- rep(NA, length(mtries))
+set.seed(123)
+for(i in 1:length(mtries)){
+  rf <- randomForest(x = stima.rid[, -ids.leak], y = stima.rid$genere,
+                    xtest = conv[, -ids.leak], ytest = conv$genere,
+                    ntree = 250, mtry = mtries[i], 
+                    nodesize = 5, weights = NULL)
+  err[i] <- rf$test$err.rate[250,1] 
+  cat(i, "")
+}
+plot(mtries, err, type = "l", xlab = "Numero di covariate campionate",
+     ylab = "Tasso di errata classificazione", main = "")
+mtry.opt <- mtries[which.min(err)]
+abline(v = mtry.opt, col = 2, lty = "dashed")
+```
+
+
+Successivamente il modello selezionato è adattato sull'intero insieme di stima e permette di ottenere un tasso di errata classificazione nell'insieme di verifica pari al **9.71%**.\
+Questo modello permette di ottenere una misura di importanza delle variabili esplicative, senza però avere indicazione sulla direzione dell'effetto di esse sulla risposta. In queso caso, la Figura \ref{fig:plot6} mette in luce che le variabili più importanti in termini di diminuzione dell'errore di previsione risultano essere il primo quartile, la piattezza spettrale, la media e il massimo della frequenza fondamentale e la frequenza media.\
+
+```{r plot6, , fig.dim = c(4,4),fig.align = "center", fig.cap= "\\label{fig:plot6}Importanza delle variabili nel random forest"}
+set.seed(2222)
+rf <- randomForest(x = stima[, -ids.leak], y = stima$genere, ntree = 250,
+                  mtry = mtry.opt, importance = TRUE, weights = NULL)
+rf.pred.prob <- predict(rf, newdata = ver, type = "prob")[,2]
+rf.tab <- tabella.sommario(rf.pred.prob > 0.5, ver$genere)
+tab <- c(tab, list(randomforest = rf.tab))
+names(tab)[5] <- "Random Forest"
+varImpPlot(rf, type = "1", main = "")
+```
+
+### Bagging
+
+Si adatta un *bagging* con alberi di classificazione. Viene calcolato l'errore OOB per diversi valori del numero di campioni boostrap (e quindi di alberi) utilizzato dal modello, scegliendo il valore per cui l'errore OOB è minore. In questo caso è pari a 150, come si evince dalla Figura \ref{fig:plot7}, in cui si riporta il grafico dell'errore OOB in funzione del numero di campioni bootstrap.\
+Il modello selezionato ottiene sull'insieme di verifica un tasso di errata classificazione pari al **10.05%**.
+
+```{r plot7, fig.dim = c(4.5,3.5),fig.align = "center", fig.cap= "\\label{fig:plot7}Errore OOB (Out-Of-Bag) nell'insieme di stima in funzione del numero di campioni bootstrap"}
+library(ipred)
+nbag <- seq(10, 190, by = 10)
+err <- rep(NA, length(nbag))
+set.seed(5678)
+for(i in 1:length(nbag)){
+  bag <- bagging(stima$genere ~., data = stima,
+                nbagg = nbag[i], coob = TRUE)
+  err[i] <- bag$err
+  cat(i, "")
+}
+plot(nbag, err, xlab = "Numero di campioni bootstrap", ylab = "Errore OOB", type = "l",
+     main = "")
+nbag.opt <- nbag[which.min(err)]
+abline(v = nbag.opt, col = 2, lty = "dashed")
+set.seed(567)
+bag <- bagging(stima$genere ~., data = stima,
+              nbagg = nbag.opt, coob = TRUE)
+bag.pred.prob <- predict(bag, newdata = ver, type = "prob")[,2] 
+bag.tab <- tabella.sommario(bag.pred.prob > 0.5, ver$genere) 
+tab <- c(tab, list(Bagging = bag.tab))
+```
+
+
+### Boosting
+
+Si adatta un *boosting* con alberi di classificazione. Per individuare il numero di alberi necessari a stabilizzare l'errore di previsione, si divide l'insieme di stima in un insieme di stima ridotto e uno di convalida. La Figura \ref{fig:plot8} mostra l'errore di previsione nell'insieme di convalida in funzione del numero di iterazioni dell'algoritmo, facendo notare che l'errore si stabilizza dopo 130 iterazioni.\
+
+```{r plot8, fig.dim = c(4.5,3.5),fig.align = "center", fig.cap= "\\label{fig:plot8}Errore di previsione nell'insieme di convalida in funzione del numero di iterazioni"}
+library(ada)
+set.seed(99)
+boost <- ada(stima.rid$genere~., data = stima.rid,
+            test.x = conv[, -ids.leak], test.y = conv$genere, iter = 200)
+plot(boost, test = TRUE)
+
+```
+
+Il modello selezionato è riadattato sull'intero insieme di stima e ottiene un tasso di errata classificazione nell'insieme di verifica pari al **10.51%**.\
+Anche questo modello ha il pregio di portare informazione sull'importanza delle variabili esplicative. La Figura \ref{fig:plot9} permette di far notare che le variabili maggiormente presenti negli stumps risultano essere la mediana, la moda, il primo e il terzo quartile, la media e il massimo della frequenza dominante.
+```{r plot9, fig.dim = c(4,4),fig.align = "center", fig.cap= "\\label{fig:plot9}Importanza delle variabili nel boosting"}
+set.seed(111)
+boost <- ada(stima$genere ~., data = stima, iter = 130)
+boost.pred.prob <- predict(boost, newdata = ver, type = "prob")[,2]
+boost.tab <- tabella.sommario(boost.pred.prob > 0.5, ver$genere)
+tab <- c(tab, list(Boosting = boost.tab))
+varplot(boost) 
+
+```
+
+
+
+## Risultati
+
+Nella Tabella 1 si riportano i risultati ottenuti coi diversi modelli adattati in termini di accuratezza (ovvero il complemento ad 1 del tasso di errata classificazione).
+
+```{r table1, results = TRUE}
+
+metriche.class = function(lista){
+  n.mod = length(lista)
+  nomi = names(lista)
+  nomi.num = rep(NA, n.mod)
+  for(i in 1:n.mod) nomi.num[i] = nomi[i]
+  mat = matrix(NA, n.mod, 5)
+  rownames(mat) = nomi.num
+  colnames(mat) = c("Accuratezza", "Sensibilita'", "Specificita'",
+                    "Precisione", "F1 Score")
+  for(i in 1:n.mod){
+    mat[i,1] = acc = sum(diag(lista[[i]]))/sum(lista[[i]])
+    mat[i,2] = sens = lista[[i]][2,2]/sum(lista[[i]][,2])
+    mat[i,3] = spec = lista[[i]][1,1]/sum(lista[[i]][,1])
+    mat[i,4] = prec = lista[[i]][2,2]/sum(lista[[i]][2,])
+    mat[i,5] = f1 = 2/((1/sens) + (1/prec))
+  }
+  return(mat)
+}
+
+knitr::kable(sort(metriche.class(tab)[,1], decreasing = T), 
+             caption = "Tasso di accuratezza dei modelli adattati",
+             col.names = "Accuratezza", align = "c", 
+             digits = 4 ,format = "simple")
+
+
+
+```
+
+Si nota come il modello che permette di riconoscere in maniera migliore la voce dei file audio risulta essere il *random forest*, in quanto ha un'accuratezza del 90.29%, seguito dal *bagging* e dal *boosting*, i quali hanno un tasso di accuratezza praticamente identico a quello del modello migliore e pari rispettivamente all'89.95% e all'89.49%. Una capacità predittiva peggiore si ha con il modello additivo generalizzato (86.31%), l'albero di classificazione (85.59%), il modello logistico (85.25%) e il modello logistico stepwise (85.10%).\
+Focalizzando l'attenzione sul *random forest*, come già è stato detto in precedenza, questo modello permette di avere una misura di importanza delle variabili esplicative, senza però avere indicazione sulla direzione dell'effetto di queste variabili sulla risposta. In questo caso, le variabili maggiormente importanti risultano essere il primo quartile, la piattezza spettrale, la media e il massimo della frequenza fondamentale e la frequenza media. \
